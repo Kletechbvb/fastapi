@@ -35,29 +35,27 @@ def ask_question(chat_id: str, question: str, onlycontext: bool = True):
     context = chat["context"]
 
     if onlycontext:
+        # STRICT: Answer only from context
         instruction = """
-        You are a strict but supportive study assistant 📘🧠.
+        You are a study assistant 📘🧠.
         RULES:
-        • Answer ONLY from CONTEXT. If not found, reply exactly:
+        • Answer ONLY from the CONTEXT given.
+        • Use very simple and easy-to-understand language.
+        • DO NOT add anything that is not in the CONTEXT.
+        • If the answer is not in the CONTEXT, reply exactly:
           "❌ Sorry, I couldn’t find anything related in your uploads."
-        • Reply in the SAME LANGUAGE as the QUESTION.
-        • Format answers:
-          1. Key Concepts 🌱
-          2. Definitions 📘
-          3. Examples 💡
-          4. Summary 🎯
         """
     else:
+        # Flexible: Can go beyond context if needed
         instruction = """
-        You are a helpful study assistant 📘🧠.
+        You are a helpful and friendly study assistant 📘🧠.
         RULES:
-        • Use CONTEXT as main source, small extra clarifications allowed.
-        • Reply in the SAME LANGUAGE as the QUESTION.
-        • Format answers:
-          1. Key Concepts 🌱
-          2. Definitions 📘
-          3. Examples 💡
-          4. Summary 🎯
+        • Answer the QUESTION clearly in simple, easy language.
+        • Add emojis where natural 😊💡.
+        • If needed, give short explanations to help understanding.
+        • Be open to give any related or detailed information, 
+          even if it’s not in the CONTEXT.
+        • Keep it direct and easy to read.
         """
 
     user_prompt = f"""
@@ -83,7 +81,7 @@ def ask_question(chat_id: str, question: str, onlycontext: bool = True):
         else:
             answer = "❌ Sorry, I couldn’t find anything related."
 
-        # Save user Q and Gemini A in chat history
+        # Save user question + AI answer in history
         chats_collection.update_one(
             {"_id": ObjectId(chat_id)},
             {"$push": {"messages": {"role": "user", "text": question, "timestamp": datetime.utcnow().isoformat()}}}
