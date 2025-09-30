@@ -57,7 +57,7 @@ def extract_text_from_file(file: UploadFile) -> str:
     else:
         return "Unsupported file format."
 
-@router.post("/create")
+@router.get("/create")
 async def create_chat(user_email: str = Form(...), file: UploadFile = Form(...)):
     extracted_text = extract_text_from_file(file)
 
@@ -96,7 +96,7 @@ def get_all_chats(user_email: str):
     ]
     return {"status": "success", "chats": result}
 
-@router.delete("/delete/{chat_id}")
+@router.get("/delete/{chat_id}")
 def delete_chat(chat_id: str, user_email: str):
     chat = chats_collection.find_one({"_id": ObjectId(chat_id)})
     if not chat:
