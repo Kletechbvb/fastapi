@@ -57,7 +57,7 @@ def extract_text_from_file(file: UploadFile) -> str:
     else:
         return "Unsupported file format."
 
-@router.get("/create")
+@router.post("/create")
 async def create_chat(user_email: str = Form(...), file: UploadFile = Form(...)):
     extracted_text = extract_text_from_file(file)
 
