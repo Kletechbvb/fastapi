@@ -3,7 +3,7 @@ from pymongo import MongoClient
 from bson import ObjectId
 from datetime import datetime
 import docx, io, asyncio, httpx
-from PyPDF2 import PdfReader, PdfWriter
+from pdf2image import convert_from_bytes
 
 # MongoDB setup (hardcoded)
 MONGO_URI = "mongodb+srv://chatpdfxai_db_user:esfmQRoJQZpJ7if3@cluster0.xzatb0d.mongodb.net/chatpdf?retryWrites=true&w=majority&appName=Cluster0"
@@ -18,8 +18,8 @@ OCR_URL = "https://api.ocr.space/parse/image"
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
-async def ocr_page(session, page_bytes: io.BytesIO, page_num: int, filename: str) -> str:
-    files = {"file": (f"{filename}_page{page_num}.pdf", page_bytes, "application/pdf")}
+async def ocr_image_page(session, buf: io.BytesIO, page_num: int) -> str:
+    files = {"file": (f"page_{page_num}.png", buf, "image/png")}
     data = {"apikey": OCR_API_KEY, "language": "eng"}
 
     resp = await session.post(OCR_URL, files=files, data=data)
@@ -50,19 +50,19 @@ async def extract_text_from_file(file: UploadFile) -> str:
 
     elif filename.endswith(".pdf"):
         file.file.seek(0)
-        reader = PdfReader(file.file)
+        pdf_bytes = file.file.read()
+
+        # Convert each PDF page into an image
+        pages = convert_from_bytes(pdf_bytes, dpi=200)
         tasks = []
 
         async with httpx.AsyncClient(timeout=None) as session:
-            for page_num, page in enumerate(reader.pages, start=1):
-                writer = PdfWriter()
-                writer.add_page(page)
+            for idx, page in enumerate(pages, start=1):
+                buf = io.BytesIO()
+                page.save(buf, format="PNG")
+                buf.seek(0)
 
-                page_bytes = io.BytesIO()
-                writer.write(page_bytes)
-                page_bytes.seek(0)
-
-                tasks.append(ocr_page(session, page_bytes, page_num, file.filename))
+                tasks.append(ocr_image_page(session, buf, idx))
 
             results = await asyncio.gather(*tasks)
 
@@ -104,7 +104,7 @@ async def create_chat(user_email: str = Form(...), file: UploadFile = Form(...))
     return {
         "status": "success",
         "chat_id": str(result.inserted_id),
-        "context_preview": extracted_text[:200]
+        "context_preview": extracted_text[:200]  # preview only
     }
 
 
