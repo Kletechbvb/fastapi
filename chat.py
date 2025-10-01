@@ -19,6 +19,7 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 async def ocr_image_page(session, buf: io.BytesIO, page_num: int) -> str:
+    """Send a single page image to OCR.space"""
     files = {"file": (f"page_{page_num}.png", buf, "image/png")}
     data = {"apikey": OCR_API_KEY, "language": "eng"}
 
@@ -34,19 +35,22 @@ async def ocr_image_page(session, buf: io.BytesIO, page_num: int) -> str:
     return text
 
 
-async def extract_text_from_file(file: UploadFile) -> str:
+async def extract_text_from_file(file: UploadFile) -> tuple[str, int]:
+    """Extract text from uploaded file, return (text, page_count)."""
     filename = file.filename.lower()
 
     if filename.endswith(".docx"):
         d = docx.Document(file.file)
-        return "\n".join([p.text for p in d.paragraphs])
+        text = "\n".join([p.text for p in d.paragraphs])
+        return text, 1
 
     elif filename.endswith(".txt"):
         try:
-            return file.file.read().decode("utf-8")
+            text = file.file.read().decode("utf-8")
         except UnicodeDecodeError:
             file.file.seek(0)
-            return file.file.read().decode("latin-1")
+            text = file.file.read().decode("latin-1")
+        return text, 1
 
     elif filename.endswith(".pdf"):
         file.file.seek(0)
@@ -61,12 +65,12 @@ async def extract_text_from_file(file: UploadFile) -> str:
                 buf = io.BytesIO()
                 page.save(buf, format="PNG")
                 buf.seek(0)
-
                 tasks.append(ocr_image_page(session, buf, idx))
 
             results = await asyncio.gather(*tasks)
 
-        return "\n".join(results).strip()
+        text = "\n".join(results).strip()
+        return text, len(pages)
 
     elif filename.endswith((".png", ".jpg", ".jpeg")):
         file.file.seek(0)
@@ -77,20 +81,20 @@ async def extract_text_from_file(file: UploadFile) -> str:
             result = resp.json()
 
             if result.get("IsErroredOnProcessing"):
-                return f"❌ OCR failed: {result.get('ErrorMessage', 'Unknown error')}"
+                return f"❌ OCR failed: {result.get('ErrorMessage', 'Unknown error')}", 1
 
             text = ""
             for parsed_result in result.get("ParsedResults", []):
                 text += parsed_result.get("ParsedText", "") + "\n"
-            return text.strip()
+            return text.strip(), 1
 
     else:
-        return "Unsupported file format."
+        return "Unsupported file format.", 0
 
 
 @router.post("/create")
 async def create_chat(user_email: str = Form(...), file: UploadFile = Form(...)):
-    extracted_text = await extract_text_from_file(file)
+    extracted_text, page_count = await extract_text_from_file(file)
 
     chat_doc = {
         "user_email": user_email,
@@ -104,7 +108,9 @@ async def create_chat(user_email: str = Form(...), file: UploadFile = Form(...))
     return {
         "status": "success",
         "chat_id": str(result.inserted_id),
-        "context_preview": extracted_text[:200]  # preview only
+        "page_count": page_count,
+        "text_length": len(extracted_text),
+        "pages_snippet": extracted_text[:1000]  # bigger preview for debugging
     }
 
 
