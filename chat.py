@@ -2,7 +2,8 @@ from fastapi import APIRouter, UploadFile, Form
 from pymongo import MongoClient
 from bson import ObjectId
 from datetime import datetime
-import requests, docx, io
+import docx, io, asyncio, httpx
+from PyPDF2 import PdfReader, PdfWriter
 
 # MongoDB setup (hardcoded)
 MONGO_URI = "mongodb+srv://chatpdfxai_db_user:esfmQRoJQZpJ7if3@cluster0.xzatb0d.mongodb.net/chatpdf?retryWrites=true&w=majority&appName=Cluster0"
@@ -13,12 +14,27 @@ chats_collection = db["chats"]
 # OCR.space config (hardcoded)
 OCR_API_KEY = "K85634264488957"
 OCR_URL = "https://api.ocr.space/parse/image"
-CHUNK_SIZE = 1024 * 1024  # 1MB chunks
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
-def extract_text_from_file(file: UploadFile) -> str:
+async def ocr_page(session, page_bytes: io.BytesIO, page_num: int, filename: str) -> str:
+    files = {"file": (f"{filename}_page{page_num}.pdf", page_bytes, "application/pdf")}
+    data = {"apikey": OCR_API_KEY, "language": "eng"}
+
+    resp = await session.post(OCR_URL, files=files, data=data)
+    result = resp.json()
+
+    if result.get("IsErroredOnProcessing"):
+        return f"\n❌ OCR failed on page {page_num}: {result.get('ErrorMessage', 'Unknown error')}\n"
+
+    text = ""
+    for parsed_result in result.get("ParsedResults", []):
+        text += parsed_result.get("ParsedText", "") + "\n"
+    return text
+
+
+async def extract_text_from_file(file: UploadFile) -> str:
     filename = file.filename.lower()
 
     if filename.endswith(".docx"):
@@ -32,38 +48,41 @@ def extract_text_from_file(file: UploadFile) -> str:
             file.file.seek(0)
             return file.file.read().decode("latin-1")
 
-    elif filename.endswith((".pdf", ".png", ".jpg", ".jpeg")):
+    elif filename.endswith(".pdf"):
         file.file.seek(0)
-        file_bytes = file.file.read()
-        text = ""
+        reader = PdfReader(file.file)
+        tasks = []
 
-        # Split into 1MB chunks
-        for i in range(0, len(file_bytes), CHUNK_SIZE):
-            chunk = file_bytes[i:i+CHUNK_SIZE]
+        async with httpx.AsyncClient(timeout=None) as session:
+            for page_num, page in enumerate(reader.pages, start=1):
+                writer = PdfWriter()
+                writer.add_page(page)
 
-            # Send chunk to OCR.space
-            response = requests.post(
-                OCR_URL,
-                files={
-                    "file": (
-                        f"{file.filename}_part{i//CHUNK_SIZE+1}",
-                        io.BytesIO(chunk),
-                        file.content_type
-                    )
-                },
-                data={"apikey": OCR_API_KEY, "language": "eng"}
-            )
+                page_bytes = io.BytesIO()
+                writer.write(page_bytes)
+                page_bytes.seek(0)
 
-            result = response.json()
+                tasks.append(ocr_page(session, page_bytes, page_num, file.filename))
+
+            results = await asyncio.gather(*tasks)
+
+        return "\n".join(results).strip()
+
+    elif filename.endswith((".png", ".jpg", ".jpeg")):
+        file.file.seek(0)
+        async with httpx.AsyncClient(timeout=None) as session:
+            files = {"file": (file.filename, file.file, file.content_type)}
+            data = {"apikey": OCR_API_KEY, "language": "eng"}
+            resp = await session.post(OCR_URL, files=files, data=data)
+            result = resp.json()
 
             if result.get("IsErroredOnProcessing"):
-                text += f"\n❌ OCR failed on chunk {i//CHUNK_SIZE+1}: {result.get('ErrorMessage', 'Unknown error')}\n"
-                continue
+                return f"❌ OCR failed: {result.get('ErrorMessage', 'Unknown error')}"
 
+            text = ""
             for parsed_result in result.get("ParsedResults", []):
                 text += parsed_result.get("ParsedText", "") + "\n"
-
-        return text.strip()
+            return text.strip()
 
     else:
         return "Unsupported file format."
@@ -71,13 +90,13 @@ def extract_text_from_file(file: UploadFile) -> str:
 
 @router.post("/create")
 async def create_chat(user_email: str = Form(...), file: UploadFile = Form(...)):
-    extracted_text = extract_text_from_file(file)
+    extracted_text = await extract_text_from_file(file)
 
     chat_doc = {
         "user_email": user_email,
         "file_name": file.filename,
         "context": extracted_text,
-        "messages": [],  # chat history
+        "messages": [],
         "created_at": datetime.utcnow().isoformat()
     }
     result = chats_collection.insert_one(chat_doc)
@@ -117,7 +136,6 @@ def delete_chat(chat_id: str, user_email: str):
     if not chat:
         return {"status": "error", "message": "Chat not found ❌"}
 
-    # Only allow owner to delete
     if chat["user_email"] != user_email:
         return {"status": "error", "message": "Not authorized to delete this chat ❌"}
 
