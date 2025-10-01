@@ -12,3 +12,7 @@ python-pptx==0.6.23       # PowerPoint (.pptx) support
 openpyxl==3.1.5           # Excel (.xlsx) support
 xlrd==2.0.1               # Excel (.xls) support
 Pillow==10.4.0            # Required by pdf2image & python-pptx
+
+# 🔹 EMAIL & VALIDATION
+sendgrid==6.11.0          # SendGrid email client
+email-validator==2.2.0    # Required for Pydantic EmailStr
