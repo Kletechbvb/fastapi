@@ -4,6 +4,9 @@ from bson import ObjectId
 from datetime import datetime
 import docx, io, asyncio, httpx
 from pdf2image import convert_from_bytes
+from pptx import Presentation        # NEW for pptx
+import openpyxl                      # NEW for xlsx
+import xlrd                          # NEW for xls
 
 # MongoDB setup (hardcoded)
 MONGO_URI = "mongodb+srv://chatpdfxai_db_user:esfmQRoJQZpJ7if3@cluster0.xzatb0d.mongodb.net/chatpdf?retryWrites=true&w=majority&appName=Cluster0"
@@ -87,6 +90,56 @@ async def extract_text_from_file(file: UploadFile) -> tuple[str, int]:
             for parsed_result in result.get("ParsedResults", []):
                 text += parsed_result.get("ParsedText", "") + "\n"
             return text.strip(), 1
+
+    # 🔹 PowerPoint support (slides, tables, notes)
+    elif filename.endswith(".pptx"):
+        file.file.seek(0)
+        prs = Presentation(file.file)
+        text = ""
+
+        for idx, slide in enumerate(prs.slides, start=1):
+            text += f"\n--- Slide {idx} ---\n"
+            for shape in slide.shapes:
+                if hasattr(shape, "text") and shape.text.strip():
+                    text += shape.text + "\n"
+
+                # Handle tables
+                if shape.has_table:
+                    for row in shape.table.rows:
+                        row_text = " | ".join([cell.text.strip() for cell in row.cells])
+                        text += row_text + "\n"
+
+            # Handle speaker notes
+            if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
+                notes = slide.notes_slide.notes_text_frame.text.strip()
+                if notes:
+                    text += f"Notes: {notes}\n"
+
+        return text.strip(), len(prs.slides)
+
+    # 🔹 Excel support (.xlsx)
+    elif filename.endswith(".xlsx"):
+        file.file.seek(0)
+        wb = openpyxl.load_workbook(file.file, read_only=True)
+        text = ""
+        for sheet in wb.sheetnames:
+            text += f"\n--- Sheet: {sheet} ---\n"
+            ws = wb[sheet]
+            for row in ws.iter_rows(values_only=True):
+                text += " | ".join([str(cell) if cell else "" for cell in row]) + "\n"
+        return text.strip(), len(wb.sheetnames)
+
+    # 🔹 Excel support (.xls)
+    elif filename.endswith(".xls"):
+        file.file.seek(0)
+        wb = xlrd.open_workbook(file_contents=file.file.read())
+        text = ""
+        for sheet in wb.sheets():
+            text += f"\n--- Sheet: {sheet.name} ---\n"
+            for row_idx in range(sheet.nrows):
+                row = sheet.row(row_idx)
+                text += " | ".join([str(cell.value) for cell in row]) + "\n"
+        return text.strip(), wb.nsheets
 
     else:
         return "Unsupported file format.", 0
