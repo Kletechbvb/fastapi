@@ -202,11 +202,11 @@
 #     return {"status": "success", "message": f"Chat {chat_id} deleted ✅"}
 
 
-
 from fastapi import FastAPI, APIRouter, UploadFile, Form
 from pymongo import MongoClient
 from bson import ObjectId
 from datetime import datetime
+import os
 import docx, io, asyncio
 from pdf2image import convert_from_bytes
 from pptx import Presentation
@@ -223,8 +223,11 @@ app = FastAPI(title="ChatPDFXAI", version="2.0")
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-# MongoDB setup (hardcoded for simplicity — replace with env var in production)
-MONGO_URI = "mongodb+srv://chatpdfxai_db_user:esfmQRoJQZpJ7if3@cluster0.xzatb0d.mongodb.net/chatpdf?retryWrites=true&w=majority&appName=Cluster0"
+# MongoDB setup (via environment variable for safety)
+MONGO_URI = os.getenv("MONGO_URI")
+if not MONGO_URI:
+    raise ValueError("❌ MONGO_URI environment variable not set!")
+
 client = MongoClient(MONGO_URI)
 db = client["chatpdf"]
 chats_collection = db["chats"]
@@ -265,12 +268,13 @@ async def extract_text_from_file(file: UploadFile) -> tuple[str, int]:
         file.file.seek(0)
         pdf_bytes = file.file.read()
 
-        pages = convert_from_bytes(pdf_bytes, dpi=150)
+        pages = convert_from_bytes(pdf_bytes, dpi=100)  # optimized for Railway
         text = ""
 
         for idx, page in enumerate(pages, start=1):
             page_text = ocr_image(page)
             text += f"\n--- Page {idx} ---\n{page_text}\n"
+            del page  # free memory
 
         return text.strip(), len(pages)
 
