@@ -60,5 +60,5 @@ EXPOSE 8080
 ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/4.00/tessdata/
 
 # Run FastAPI app (Railway will auto-inject PORT env var)
-CMD ["bash", "-c", "uvicorn chat:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["bash", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8080}"]
 
